@@ -3,20 +3,19 @@ side_by_side = true;
 $fa=1;$fs=1;
 
 
-print_bed = 170; // Prusa MINI+
+print_bed = 180; // Prusa MINI+
 epsilon=0.01; // for stitching pieces together in the final model
 tolerance=0.2; // for interlocking parts
 
 inches = 25.4;
 drawer_width = 13 * inches;
-//drawer_width = 2 * inches; //testing
-//drawer_width = 28 * inches; //testing
+//drawer_width = 3 * inches; //testing small scale
+//drawer_width = 28 * inches; //testing part splitting
 drawer_height = 3.25 * inches;
 drawer_depth = 19 * inches;
 
 // https://www.reddit.com/r/nespresso/comments/r499a1/vertuo_pod_dimensions/
 pod_ring_diameter = 2.25 * inches + 1 /* extra wiggle room */;
-//pod_ring_diameter = 1 * inches; // testing connectors
 pod_ring_thickness = 3/32 * inches;
 pod_ring_crimp_width = 3/16 * inches; // part of the diameter
 pod_depths = [
@@ -28,8 +27,7 @@ pod_depths = [
 
 base_thickness = 2; // this is the thickness of the base below the pod
 pod_spacer_thickness = pod_ring_thickness; // walls between pods; seems like a nice aesthetic to have them match; this is also the endcap thickness
-plug_length = 4*(pod_ring_thickness + pod_spacer_thickness); // plug for interlocking multiple pieces together
-//plug_length = 2*(pod_ring_thickness + pod_spacer_thickness); // testing connectors
+plug_length = 3*(pod_ring_thickness + pod_spacer_thickness); // plug for interlocking multiple pieces together
 
 // organizer is installed sideways in the drawer
 // maximized the number of slots for the drawer
@@ -81,18 +79,21 @@ module pod_slot() {
 }
 
 module plug(length, radius, flange=false) {
+    stem_length = length - radius; // leave room for the ball
+    
     union() {
+        translate([-length/2+stem_length/2-epsilon,0,0]) // align with the base of the plug
         rotate([0, 90, 0])
-        cylinder(h=length, r=radius-tolerance, center=true);
+        cylinder(h=stem_length+epsilon, r=radius-tolerance, center=true);
         
         if (flange) {
-            flange_length=length-radius; // flange down to where the sphere starts
-            translate([-length/2 + flange_length/2,0,0])
+            flange_length=stem_length-radius; // flange down to where the sphere starts
+            translate([-length/2 + flange_length/2 - epsilon,0,0]) // align with the base of the plug
             rotate([0,90,0])
-            cylinder(h=flange_length, r1=radius+tolerance, r2=radius-tolerance, center=true);
+            cylinder(h=flange_length+epsilon, r1=radius+tolerance, r2=radius-tolerance, center=true);
         }
         
-        translate([plug_length/2, 0, 0])
+        translate([-length/2+stem_length, 0, 0]) // center on the tip of the stem
         sphere(r=radius);
     }
 }
@@ -116,7 +117,6 @@ module pod_organizer_part(number_of_slots, include_left_endcap=true, include_rig
         3*pod_ring_diameter/2 + base_thickness - 2*sqrt(2*(pod_ring_diameter/2)^2 + pod_ring_diameter/2*base_thickness),
         3*pod_ring_diameter + base_thickness + 2*sqrt(2*(pod_ring_diameter/2)^2 + pod_ring_diameter/2*base_thickness)
     );
-    echo(str("Max Plug Radius: ", max_plug_radius));
     plug_cutout_radius=max_plug_radius - base_thickness;
     plug_radius=plug_cutout_radius - tolerance;
 
@@ -146,44 +146,51 @@ module pod_organizer_part(number_of_slots, include_left_endcap=true, include_rig
 
             // right end has plug
             if (!include_right_endcap) {
-                translate([part_width/2, -organizer_depth/2 + max_plug_radius, -organizer_height/2 + plug_radius + max_plug_radius/2])
+                translate([part_width/2+plug_length/2, -organizer_depth/2 + max_plug_radius, -organizer_height/2 + plug_radius + max_plug_radius/2])
                 plug(plug_length, plug_radius);
                 
-                translate([part_width/2, -1*(-organizer_depth/2 + max_plug_radius), -organizer_height/2 + plug_radius + max_plug_radius/2])
+                translate([part_width/2+plug_length/2, -1*(-organizer_depth/2 + max_plug_radius), -organizer_height/2 + plug_radius + max_plug_radius/2])
                 plug(plug_length, plug_radius);
             }
         }
     
         // left end has a cutout for the plug
         if (!include_left_endcap) {
-            translate([-part_width/2+plug_length/2-epsilon, -organizer_depth/2 + max_plug_radius, -organizer_height/2 + plug_radius + max_plug_radius/2])
-            plug(plug_length + epsilon, plug_cutout_radius, flange=true);
+            translate([-part_width/2+plug_length/2, -organizer_depth/2 + max_plug_radius, -organizer_height/2 + plug_radius + max_plug_radius/2])
+            plug(plug_length, plug_cutout_radius, flange=true);
             
-            translate([-part_width/2+plug_length/2-epsilon, -1*(-organizer_depth/2 + max_plug_radius), -organizer_height/2 + plug_radius + max_plug_radius/2])
-            plug(plug_length + epsilon, plug_cutout_radius, flange=true);
+            translate([-part_width/2+plug_length/2, -1*(-organizer_depth/2 + max_plug_radius), -organizer_height/2 + plug_radius + max_plug_radius/2])
+            plug(plug_length, plug_cutout_radius, flange=true);
         }
     }
 }
 
 // Generate the right number of pieces to fit on the printer
 if (organizer_width > print_bed /*|| true /*testing*/) {
-    number_of_parts = ceil(organizer_width / print_bed);
+    number_of_parts = ceil((organizer_width + plug_length) / print_bed); // TODO doesn't account for extra plug length very well
     //number_of_parts = 2; // testing
+    
+    minimum_number_of_slots_per_piece = 5;
     
     if (number_of_parts == 2) {
         // Just split the part in half
         first_part_slot_count = floor(number_of_slots/2);
+        second_part_slot_count = number_of_slots - first_part_slot_count;
+        
+        // If these assertions fail, then we need to fudge the numbers to have a better split across the parts. Future work.
+        assert(first_part_slot_count > minimum_number_of_slots_per_piece);
+        assert(second_part_slot_count > minimum_number_of_slots_per_piece);
+        assert(first_part_slot_count * (pod_spacer_thickness + pod_ring_thickness) + plug_length < print_bed, str("Part too large: ", first_part_slot_count * (pod_spacer_thickness + pod_ring_thickness) + plug_length, " > ", print_bed));
+        assert(second_part_slot_count * (pod_spacer_thickness + pod_ring_thickness) + pod_spacer_thickness /* right endcap */ < print_bed);
         
         translate(side_by_side ? [0, 2*organizer_depth, 0] : [-organizer_width/2, 0, 0])
         pod_organizer_part(first_part_slot_count, include_left_endcap=true, include_right_endcap=false);
     
-        pod_organizer_part(number_of_slots - first_part_slot_count, include_left_endcap=false, include_right_endcap=true);
+        pod_organizer_part(second_part_slot_count, include_left_endcap=false, include_right_endcap=true);
 
     } else {
         // need to print multiple middle sections with separate endcaps
-        echo(str("You need to print the open-ended piece ", number_of_parts-2, " times and glue them all together."));
-        
-        minimum_number_of_slots_per_piece = 5;
+        echo(str("You need to print the open-ended piece ", number_of_parts-2, " times and snap them all together."));
         
         left_slot_count = floor(number_of_slots / number_of_parts);
         middle_slot_count = floor(number_of_slots / number_of_parts);
@@ -193,17 +200,17 @@ if (organizer_width > print_bed /*|| true /*testing*/) {
         assert(left_slot_count > minimum_number_of_slots_per_piece);
         assert(middle_slot_count > minimum_number_of_slots_per_piece);
         assert(middle_slot_count > minimum_number_of_slots_per_piece);
-        assert(left_slot_count * (pod_spacer_thickness + pod_ring_thickness) < print_bed);
-        assert(middle_slot_count * (pod_spacer_thickness + pod_ring_thickness) < print_bed);
+        assert(left_slot_count * (pod_spacer_thickness + pod_ring_thickness) + plug_length < print_bed);
+        assert(middle_slot_count * (pod_spacer_thickness + pod_ring_thickness) + plug_length < print_bed);
         assert(right_slot_count * (pod_spacer_thickness + pod_ring_thickness) + pod_spacer_thickness /* right endcap */ < print_bed);
         
     
-        translate([0, 2*organizer_depth, 0])
+        translate(side_by_side ? [0, 2*organizer_depth, 0] : [-organizer_width/2, 0, 0])
         pod_organizer_part(left_slot_count, include_left_endcap=true, include_right_endcap=false);
     
         pod_organizer_part(middle_slot_count, include_left_endcap=false, include_right_endcap=false);
-    
-        translate([0, -2*organizer_depth, 0])
+
+        translate(side_by_side ? [0, -2*organizer_depth, 0] : [organizer_width/2, 0, 0])
         pod_organizer_part(right_slot_count, include_left_endcap=false, include_right_endcap=true);
     }
 
