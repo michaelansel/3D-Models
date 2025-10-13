@@ -1,0 +1,4 @@
+- Create picture.png
+- Update the scad file with the image dimensions
+- Generate STL
+- Add paint-on-supports for the interior of the cover
